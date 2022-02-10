@@ -22,6 +22,8 @@ class Window:
         self.server = Entry(self.root, width=100)
         self.login = Entry(self.root, width=100)
         self.password = Entry(self.root, width=100)
+        self.text_for_letter = None
+        self.text_on_screen = None
 
     def run(self):
         self.root.mainloop()
@@ -123,7 +125,7 @@ class Window:
         self.root.configure(menu=menu_bar)
 
     def send_mail_form(self):
-        send_form = ChildWindow(self.root, 400, 150, "Отправка уведомлений")
+        send_form = ChildWindow(self.root, 400, 400, "Отправка уведомлений")
 
         Label(send_form.root, text="Введите сервер").pack()
         self.server = Entry(send_form.root, width=100)
@@ -134,38 +136,52 @@ class Window:
         Label(send_form.root, text="Введите пароль").pack()
         self.password = Entry(send_form.root, width=100)
         self.password.pack()
+        Button(send_form.root, text="Файл с текстом письма", command=self.get_text_for_letter).pack()
         Button(send_form.root, text="Разослать уведомления", command=self.send_mails).pack()
+        scroll_bar = Scrollbar(send_form.root)
+        scroll_bar.pack(side=RIGHT, fill=Y)
+        self.text_on_screen = Text(send_form.root, width=400, height=300, wrap = WORD, yscrollcommand = scroll_bar.set)
+        self.text_on_screen.pack()
         send_form.grab_focus()
 
     def send_mails(self):
+        if self.text_for_letter:
+            msg = MIMEText(self.text_for_letter)
+            msg['Subject'] = Header('Пройдите курсы в Пульс!', 'utf-8')
+            msg['From'] = self.login.get()
+            msg['To'] = "admitriev211@gmail.com"
 
-        longtext = """
-        Уважаемый сотрудник!\n
-        Вся команда Байкальского банка уверена, что Вы сможете одержать победу над недугом, а после вспоминая это, Вы будете собой гордиться, ведь это уже пройденный этап Вашей жизни, который Вы смогли преодолеть….\n
-        А чтобы вам легче было отвлечься, предлагаем Вам думать о хорошем, позаботиться о своем выздоровлении, и с пользой провести время.
-        Пройдите курсы в Пульс и Виртуальной школе, на которые на работе не хватает времени.
-        """
-        msg = MIMEText(longtext, '', 'utf-8')
-        msg['Subject'] = Header('Пройдите курсы в Пульс!', 'utf-8')
-        msg['From'] = self.login.get()
-        msg['To'] = "admitriev211@gmail.com"
-
-        smtpObj = smtplib.SMTP(self.server.get(), 587)
-        smtpObj.starttls()
-        smtpObj.login(self.login.get(), self.password.get())
-        smtpObj.sendmail(self.login.get(), "admitriev211@gmail.com", msg.as_string())
-        smtpObj.quit()
-        # smtpObj = smtplib.SMTP('smtp.mail.ru', 587)
-        # smtpObj.starttls()
-        # smtpObj.login('bb_sales@bk.ru', 'RebL7NiHRiphw6AX1Xqx')
-        # smtpObj.sendmail("bb_sales@bk.ru", "admitriev211@gmail.com", "Test autosend")
-        # smtpObj.quit()
-        messagebox.showinfo('Внимание', 'Сообщение отправлено')
+            smtpObj = smtplib.SMTP(self.server.get(), 587)
+            smtpObj.starttls()
+            smtpObj.login(self.login.get(), self.password.get())
+            try:
+                smtpObj.sendmail(self.login.get(), "admitriev211@gmail.com", msg.as_string())
+                smtpObj.quit()
+                # smtpObj = smtplib.SMTP('smtp.mail.ru', 587)
+                # smtpObj.starttls()
+                # smtpObj.login('bb_sales@bk.ru', 'DSPQV5c5NFM7G2mY7bPM')
+                # smtpObj.sendmail("bb_sales@bk.ru", "admitriev211@gmail.com", "Test autosend")
+                # smtpObj.quit()
+                messagebox.showinfo('Внимание', 'Сообщение отправлено')
+            except Exception as e:
+                print(e)
+                messagebox.showinfo('Внимание', 'Что-то пошло не так')
+        else:
+            messagebox.showinfo('Внимание', 'Файл с текстом не прочитан')
 
 
     wanted_files = (
         ("excel files", "*.xls;*.xlsx"),
     )
+
+    def get_text_for_letter(self):
+        file_name = fd.askopenfilename(title="Выберите файл с текстом письма")
+        if file_name:
+            with open(file_name, encoding = 'utf-8', mode='r') as f:
+                self.text_for_letter = f.read()
+                self.text_on_screen.insert(END, self.text_for_letter)
+            print(self.text_for_letter)
+
 
     def import_pulse(self, wanted_files=wanted_files):
         file_name = fd.askopenfilename(title="Импорт выгрузки из Пульса", filetypes=wanted_files)
