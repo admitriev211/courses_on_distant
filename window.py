@@ -1,6 +1,9 @@
 from tkinter import *
 from tkinter import filedialog as fd
 from tkinter import messagebox
+from child_window import ChildWindow
+from email.mime.text import MIMEText
+from email.header import Header
 import xlrd
 import sqlite3
 import datetime
@@ -16,9 +19,15 @@ class Window:
         if icon:
             self.root.iconbitmap(icon)
         # self.label = Label(self.root, text="Статистика по задолженностям в разрезе ССП")
+        self.server = Entry(self.root, width=100)
+        self.login = Entry(self.root, width=100)
+        self.password = Entry(self.root, width=100)
 
     def run(self):
         self.root.mainloop()
+
+    def create_child(self, width, height, title, resizable=(False,False), icon=None):
+        ChildWindow(self.root, width, height, title, resizable, icon)
 
     def draw_label(self, pady, text="Статистика по задолженностям в разрезе ССП"):
         f = Frame(self.root)
@@ -36,30 +45,63 @@ class Window:
         dates = cur.fetchall()
         dates_as_date = [datetime.datetime.strptime(d[0], "%Y-%m-%d").date() for d in dates] # переформат в даты
         last_date = dates_as_date[0].strftime('%Y-%m-%d')
-        Label(self.root, text='Дата загрузки отчета из Пульс: '+last_date).pack()
-        Label(self.root, text='').pack()
 
         query = f"""
+            SELECT
+                a.boss_mail,
+                a.dep_3_level,
+                a.dep_5_level,
+                b.employees_count,
+                b.on_distant,
+                a.course_count
+            FROM (
             SELECT
                 boss_mail,
                 dep_3_level,
                 dep_5_level,
-                count(courses.emp_tab)
-            FROM courses LEFT JOIN (SELECT * FROM status LEFT JOIN employees ON emp_tab = tab) as s 
+                count(courses.emp_tab) as course_count
+            FROM (SELECT * FROM employees LEFT JOIN status ON emp_tab = tab) as s LEFT JOIN courses  
             ON
                 courses.emp_tab = s.emp_tab
             WHERE courses.date = "{last_date}" AND s.status = "болен"
-            GROUP BY boss_mail
+            GROUP BY boss_mail) as a
+            LEFT JOIN (SELECT dep_3_level, dep_5_level, count(tab) as employees_count, count(status) as on_distant FROM employees LEFT JOIN (SELECT * FROM status WHERE status = "болен") ON tab = emp_tab GROUP BY dep_3_level, dep_5_level) as b
+            ON a.dep_3_level = b.dep_3_level AND a.dep_5_level = b.dep_5_level
         """
-        # print(query)
+        print(query)
         cur.execute(query)
         result = cur.fetchall()
+        print(result)
+
+
+
+        scroll_bar = Scrollbar(self.root)
+        scroll_bar.pack(side=RIGHT, fill=Y)
+
+        text_widget = Listbox(self.root, width=800 , yscrollcommand = scroll_bar.set)
+
+        text_widget.insert(END, 'Дата загрузки отчета из Пульс: ' + last_date +'\n')
+        text_widget.insert(END, '' + '\n')
 
         for row in result:
-            Label(self.root, text='Рук-ль: ' + row[0]).pack(anchor=NW)
-            Label(self.root, text='Подразделение: ' + row[1] + '-->' + row[2]).pack(anchor=NW)
-            Label(self.root, text='Кол-во незавершенных курсов: ' + str(row[3])).pack(anchor=NW)
-            Label(self.root, text='--------------------------------').pack(anchor=NW)
+            text_widget.insert(END, 'Рук-ль: ' + row[0] +'\n')
+            text_widget.insert(END, 'Подразделение: ' + row[1] + '-->' + row[2] +'\n')
+            text_widget.insert(END, 'Всего сотрудников: ' + str(row[3]) +'\n')
+            text_widget.insert(END, 'Находятся дома: ' + str(row[4]) +'\n')
+            text_widget.insert(END, 'Кол-во незавершенных курсов у сотрудников, находящихся дома: ' + str(row[5]) +'\n')
+            text_widget.insert(END, '---------------------------------------------' + '\n')
+
+        text_widget.pack(side = LEFT, fill=BOTH)
+        scroll_bar.config(command=text_widget.yview)
+
+        #
+        # for row in result:
+        #     Label(frame, text='Рук-ль: ' + row[0]).pack(anchor=NW)
+        #     Label(frame, text='Подразделение: ' + row[1] + '-->' + row[2]).pack(anchor=NW)
+        #     Label(frame, text='Всего сотрудников: ' + str(row[3])).pack(anchor=NW)
+        #     Label(frame, text='Находятся дома: ' + str(row[4])).pack(anchor=NW)
+        #     Label(frame, text='Кол-во незавершенных курсов у сотрудников, находящихся дома: ' + str(row[5])).pack(anchor=NW)
+        #     Label(frame, text='--------------------------------').pack(anchor=NW)
 
     def draw_menu(self):
         menu_bar = Menu(self.root)
@@ -70,7 +112,8 @@ class Window:
         menu_bar.add_cascade(label="Импорт", menu=import_menu)
 
         tools_menu = Menu(menu_bar, tearoff=0)
-        tools_menu.add_command(label="Рассылка уведомлений", command=self.send_mails)
+        tools_menu.add_command(label="Рассылка уведомлений", command=self.send_mail_form)
+        # tools_menu.add_command(label="Рассылка уведомлений", command=self.send_mails)
         tools_menu.add_command(label="Рассылка предупреждений")
         menu_bar.add_cascade(label="Инструменты", menu=tools_menu)
 
@@ -79,12 +122,44 @@ class Window:
         # menu_bar.add_cascade(label="Справочники", menu=dict_menu)
         self.root.configure(menu=menu_bar)
 
+    def send_mail_form(self):
+        send_form = ChildWindow(self.root, 400, 150, "Отправка уведомлений")
+
+        Label(send_form.root, text="Введите сервер").pack()
+        self.server = Entry(send_form.root, width=100)
+        self.server.pack()
+        Label(send_form.root, text="Введите логин").pack()
+        self.login = Entry(send_form.root, width=100)
+        self.login.pack()
+        Label(send_form.root, text="Введите пароль").pack()
+        self.password = Entry(send_form.root, width=100)
+        self.password.pack()
+        Button(send_form.root, text="Разослать уведомления", command=self.send_mails).pack()
+        send_form.grab_focus()
+
     def send_mails(self):
-        smtpObj = smtplib.SMTP('smtp.mail.ru', 587)
+
+        longtext = """
+        Уважаемый сотрудник!\n
+        Вся команда Байкальского банка уверена, что Вы сможете одержать победу над недугом, а после вспоминая это, Вы будете собой гордиться, ведь это уже пройденный этап Вашей жизни, который Вы смогли преодолеть….\n
+        А чтобы вам легче было отвлечься, предлагаем Вам думать о хорошем, позаботиться о своем выздоровлении, и с пользой провести время.
+        Пройдите курсы в Пульс и Виртуальной школе, на которые на работе не хватает времени.
+        """
+        msg = MIMEText(longtext, '', 'utf-8')
+        msg['Subject'] = Header('Пройдите курсы в Пульс!', 'utf-8')
+        msg['From'] = self.login.get()
+        msg['To'] = "admitriev211@gmail.com"
+
+        smtpObj = smtplib.SMTP(self.server.get(), 587)
         smtpObj.starttls()
-        smtpObj.login('bb_sales@bk.ru', 'RebL7NiHRiphw6AX1Xqx')
-        smtpObj.sendmail("bb_sales@bk.ru", "admitriev211@gmail.com", "Test autosend")
+        smtpObj.login(self.login.get(), self.password.get())
+        smtpObj.sendmail(self.login.get(), "admitriev211@gmail.com", msg.as_string())
         smtpObj.quit()
+        # smtpObj = smtplib.SMTP('smtp.mail.ru', 587)
+        # smtpObj.starttls()
+        # smtpObj.login('bb_sales@bk.ru', 'RebL7NiHRiphw6AX1Xqx')
+        # smtpObj.sendmail("bb_sales@bk.ru", "admitriev211@gmail.com", "Test autosend")
+        # smtpObj.quit()
         messagebox.showinfo('Внимание', 'Сообщение отправлено')
 
 
