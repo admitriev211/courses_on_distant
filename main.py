@@ -24,7 +24,4 @@ window = Window(
 )
 
 window.draw_menu()
-# window.draw_label(0)
-window.draw_stats()
-
 window.run()

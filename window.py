@@ -1,6 +1,8 @@
 from tkinter import *
 from tkinter import filedialog as fd
 from tkinter import messagebox
+from tkcalendar import DateEntry
+from tkinter.ttk import Combobox
 from child_window import ChildWindow
 from email.mime.text import MIMEText
 from email.header import Header
@@ -19,11 +21,21 @@ class Window:
         if icon:
             self.root.iconbitmap(icon)
         # self.label = Label(self.root, text="Статистика по задолженностям в разрезе ССП")
+        self.top = None
         self.server = Entry(self.root, width=100)
         self.login = Entry(self.root, width=100)
         self.password = Entry(self.root, width=100)
         self.text_for_letter = None
         self.text_on_screen = None
+        self.importDate = None
+        self.chosen_file=None
+        self.list_for_import_pulse = None
+        self.c = None
+        self.scroll_bar = Scrollbar(self.root)
+        self.scroll_bar.pack(side=RIGHT, fill=Y)
+        self.text_widget = None
+        self.last_date=None
+        self.draw_stats()
 
     def run(self):
         self.root.mainloop()
@@ -31,98 +43,134 @@ class Window:
     def create_child(self, width, height, title, resizable=(False,False), icon=None):
         ChildWindow(self.root, width, height, title, resizable, icon)
 
-    def draw_label(self, pady, text="Статистика по задолженностям в разрезе ССП"):
-        f = Frame(self.root)
-        f.pack(pady=pady)
-        Label(f, text=text).pack()
-
-    def draw_stats(self):
+    def get_data_for_dash(self):
         conn = sqlite3.connect(r'dbase/dbase.db')
         cur = conn.cursor()
         cur.execute("""
-                    SELECT
-                        DISTINCT date
-                    FROM courses
-                """)
+                            SELECT
+                                DISTINCT date
+                            FROM courses
+                        """)
         dates = cur.fetchall()
-        dates_as_date = [datetime.datetime.strptime(d[0], "%Y-%m-%d").date() for d in dates] # переформат в даты
-        last_date = dates_as_date[0].strftime('%Y-%m-%d')
+
+        dates_as_date = sorted([datetime.datetime.strptime(d[0], "%Y-%m-%d").date() for d in dates], key=lambda x: x,
+                               reverse=True)  # переформат в даты и сортировка
+        # print(sorted(dates_as_date, key=lambda x:x, reverse=True))
+        self.last_date = dates_as_date[0].strftime('%Y-%m-%d')
 
         query = f"""
-            SELECT
-                a.boss_mail,
-                a.dep_3_level,
-                a.dep_5_level,
-                b.employees_count,
-                b.on_distant,
-                a.course_count
-            FROM (
-            SELECT
-                boss_mail,
-                dep_3_level,
-                dep_5_level,
-                count(courses.emp_tab) as course_count
-            FROM (SELECT * FROM employees LEFT JOIN status ON emp_tab = tab) as s LEFT JOIN courses  
-            ON
-                courses.emp_tab = s.emp_tab
-            WHERE courses.date = "{last_date}" AND s.status = "болен"
-            GROUP BY boss_mail) as a
-            LEFT JOIN (SELECT dep_3_level, dep_5_level, count(tab) as employees_count, count(status) as on_distant FROM employees LEFT JOIN (SELECT * FROM status WHERE status = "болен") ON tab = emp_tab GROUP BY dep_3_level, dep_5_level) as b
-            ON a.dep_3_level = b.dep_3_level AND a.dep_5_level = b.dep_5_level
-        """
-        print(query)
+                    SELECT
+                        a.boss_mail,
+                        a.dep_3_level,
+                        a.dep_5_level,
+                        b.employees_count,
+                        b.on_distant,
+                        a.course_count
+                    FROM (
+                    SELECT
+                        boss_mail,
+                        dep_3_level,
+                        dep_5_level,
+                        count(courses.emp_tab) as course_count
+                    FROM (SELECT * FROM employees LEFT JOIN status ON emp_tab = tab) as s LEFT JOIN courses  
+                    ON
+                        courses.emp_tab = s.emp_tab
+                    WHERE courses.date = "{self.last_date}" AND s.status = "болен"
+                    GROUP BY boss_mail) as a
+                    LEFT JOIN (SELECT dep_3_level, dep_5_level, count(tab) as employees_count, count(status) as on_distant FROM employees LEFT JOIN (SELECT * FROM status WHERE status = "болен") ON tab = emp_tab GROUP BY dep_3_level, dep_5_level) as b
+                    ON a.dep_3_level = b.dep_3_level AND a.dep_5_level = b.dep_5_level
+                """
+        # print(query)
         cur.execute(query)
         result = cur.fetchall()
-        print(result)
+        cur.close()
+        return result
 
+    def draw_stats(self):
+        gotData = self.get_data_for_dash()
+        self.text_widget = Listbox(self.root, width=800, yscrollcommand = self.scroll_bar.set)
 
+        self.text_widget.insert(END, 'Дата загрузки отчета из Пульс: ' + self.last_date +'\n')
+        self.text_widget.insert(END, '' + '\n')
 
-        scroll_bar = Scrollbar(self.root)
-        scroll_bar.pack(side=RIGHT, fill=Y)
+        for row in gotData:
+            self.text_widget.insert(END, 'Рук-ль: ' + row[0] +'\n')
+            self.text_widget.insert(END, 'Подразделение: ' + row[1] + '-->' + row[2] +'\n')
+            self.text_widget.insert(END, 'Всего сотрудников: ' + str(row[3]) +'\n')
+            self.text_widget.insert(END, 'Находятся дома: ' + str(row[4]) +'\n')
+            self.text_widget.insert(END, 'Кол-во незавершенных курсов у сотрудников, находящихся дома: ' + str(row[5]) +'\n')
+            self.text_widget.insert(END, '---------------------------------------------' + '\n')
 
-        text_widget = Listbox(self.root, width=800 , yscrollcommand = scroll_bar.set)
+        self.text_widget.pack(side = LEFT, fill=BOTH)
+        self.scroll_bar.config(command=self.text_widget.yview)
 
-        text_widget.insert(END, 'Дата загрузки отчета из Пульс: ' + last_date +'\n')
-        text_widget.insert(END, '' + '\n')
-
-        for row in result:
-            text_widget.insert(END, 'Рук-ль: ' + row[0] +'\n')
-            text_widget.insert(END, 'Подразделение: ' + row[1] + '-->' + row[2] +'\n')
-            text_widget.insert(END, 'Всего сотрудников: ' + str(row[3]) +'\n')
-            text_widget.insert(END, 'Находятся дома: ' + str(row[4]) +'\n')
-            text_widget.insert(END, 'Кол-во незавершенных курсов у сотрудников, находящихся дома: ' + str(row[5]) +'\n')
-            text_widget.insert(END, '---------------------------------------------' + '\n')
-
-        text_widget.pack(side = LEFT, fill=BOTH)
-        scroll_bar.config(command=text_widget.yview)
-
-        #
-        # for row in result:
-        #     Label(frame, text='Рук-ль: ' + row[0]).pack(anchor=NW)
-        #     Label(frame, text='Подразделение: ' + row[1] + '-->' + row[2]).pack(anchor=NW)
-        #     Label(frame, text='Всего сотрудников: ' + str(row[3])).pack(anchor=NW)
-        #     Label(frame, text='Находятся дома: ' + str(row[4])).pack(anchor=NW)
-        #     Label(frame, text='Кол-во незавершенных курсов у сотрудников, находящихся дома: ' + str(row[5])).pack(anchor=NW)
-        #     Label(frame, text='--------------------------------').pack(anchor=NW)
+    wanted_files = (
+        ("excel files", "*.xls;*.xlsx"),
+    )
 
     def draw_menu(self):
         menu_bar = Menu(self.root)
         import_menu = Menu(menu_bar, tearoff=0)
-        import_menu.add_command(label="Импорт выгрузки из Пульса", command=self.import_pulse)
+        import_menu.add_command(label="Импорт выгрузки из Пульса", command=self.import_pulse_form)
         import_menu.add_command(label="Импорт отчета по больным", command=self.import_illness_report)
         import_menu.add_command(label="Импорт ШР", command=self.import_statka)
         menu_bar.add_cascade(label="Импорт", menu=import_menu)
 
         tools_menu = Menu(menu_bar, tearoff=0)
         tools_menu.add_command(label="Рассылка уведомлений", command=self.send_mail_form)
-        # tools_menu.add_command(label="Рассылка уведомлений", command=self.send_mails)
         tools_menu.add_command(label="Рассылка предупреждений")
         menu_bar.add_cascade(label="Инструменты", menu=tools_menu)
+
+        reports_menu = Menu(menu_bar, tearoff=0)
+        reports_menu.add_command(label="Отчеты из пульса", command=self.pulse_reports)
+        menu_bar.add_cascade(label="Отчеты", menu=reports_menu)
 
         # dict_menu = Menu(menu_bar, tearoff=0)
         # dict_menu.add_command(label="Штатное расписание", command=self.dict_employees)
         # menu_bar.add_cascade(label="Справочники", menu=dict_menu)
         self.root.configure(menu=menu_bar)
+
+    def pulse_reports(self):
+        pulse_reports_window = ChildWindow(self.root, 300, 200, "Отчеты из Пульс")
+        self.top = pulse_reports_window.root
+        Label(pulse_reports_window.root, text="Выберите дату отчета").pack()
+
+        conn = sqlite3.connect(r'dbase/dbase.db')
+        cur = conn.cursor()
+        cur.execute("""
+                            SELECT
+                                DISTINCT date
+                            FROM courses
+                        """)
+        dates = cur.fetchall()
+        dates_as_date = sorted([datetime.datetime.strptime(d[0], "%Y-%m-%d").date() for d in dates], key=lambda x: x,
+                               reverse=True)  # переформат в даты и сортировка
+        values = tuple(d.strftime('%Y-%m-%d') for d in dates_as_date)
+        self.c = Combobox(pulse_reports_window.root, width=25, values=values)
+        self.c.current(0)
+        self.c.pack()
+
+        Button(pulse_reports_window.root, text="Удалить отчет", command=self.del_report).pack()
+        pulse_reports_window.grab_focus()
+
+    def del_report(self):
+        date_for_del = self.c.get()
+        print(date_for_del)
+        conn = sqlite3.connect(r'dbase/dbase.db')
+        cur = conn.cursor()
+        cur.execute(f"""
+                                    DELETE FROM courses WHERE date = "{date_for_del}"
+                                """)
+        conn.commit()
+        cur.close()
+        self.top.destroy()
+        self.top.update()
+        self.root.update()
+        messagebox.showinfo('Внимание', 'Отчет Пульс за ' + date_for_del + ' удален')
+        self.text_widget.destroy()
+        self.text_widget = None
+        self.draw_stats()
+
 
     def send_mail_form(self):
         send_form = ChildWindow(self.root, 400, 400, "Отправка уведомлений")
@@ -140,9 +188,100 @@ class Window:
         Button(send_form.root, text="Разослать уведомления", command=self.send_mails).pack()
         scroll_bar = Scrollbar(send_form.root)
         scroll_bar.pack(side=RIGHT, fill=Y)
-        self.text_on_screen = Text(send_form.root, width=400, height=300, wrap = WORD, yscrollcommand = scroll_bar.set)
+        self.text_on_screen = Text(send_form.root, width=400, height=300, wrap=WORD, yscrollcommand=scroll_bar.set)
         self.text_on_screen.pack()
         send_form.grab_focus()
+
+    def import_pulse_form(self):
+        pulse_form = ChildWindow(self.root, 200, 300, "Импорт выгрузки из Пульс")
+        self.top = pulse_form.root
+        Label(pulse_form.root, text="Дата отчета").pack()
+        self.importDate = DateEntry(pulse_form.root, width=25, date_pattern='dd/mm/yyyy', background='darkblue', foreground='white', borderwidth=2)
+        self.importDate.pack()
+        Button(pulse_form.root, width=25, text="Выбрать файл", command=self.get_file_pulse).pack()
+        self.chosen_file = Text(pulse_form.root)
+        Button(pulse_form.root, width=25, text="Импортировать", command=self.import_file_pulse).pack(pady=10)
+        pulse_form.grab_focus()
+
+    def get_file_pulse(self, wanted_files=wanted_files):
+        file_name = fd.askopenfilename(title="Импорт выгрузки из Пульса", filetypes=wanted_files)
+        if file_name:
+            xl = xlrd.open_workbook(file_name, on_demand=True)
+            sh = xl.sheet_by_index(0)
+            course_list = []
+            for row in range(4, sh.nrows - 1):
+                # if sh.cell(row, 10).value == 'Байкальский банк' \
+                #         and sh.cell(row, 13).value == 'Якутское отделение № 8603' \
+                #         and sh.cell(row, 14).value == 'Аппарат отделения':
+                course = [
+                    sh.cell(row, 1).value,
+                    sh.cell(row, 7).value,
+                    sh.cell(row, 22).value,
+                    sh.cell(row, 25).value,
+                    sh.cell(row, 26).value,
+                    sh.cell(row, 28).value,
+                ]
+
+                course_list.append(course)
+            self.list_for_import_pulse = course_list
+            self.chosen_file.insert(END, file_name)
+            self.chosen_file.pack()
+
+    def import_file_pulse(self):
+        if self.list_for_import_pulse and self.importDate.get_date():
+            conn = sqlite3.connect(r'dbase/dbase.db')
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS courses(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT,
+                emp_tab INT,
+                emp_mail TEXT,
+                boss_tab INT,
+                boss_mail TEXT,
+                course_name TEXT,
+                deadline TEXT,
+                FOREIGN KEY (emp_tab) REFERENCES employees(tab),
+                FOREIGN KEY (boss_tab) REFERENCES employees(tab));
+                """
+            )
+            conn.commit()
+
+            cur.execute(
+                f"""
+                DELETE FROM courses WHERE date = "{str(self.importDate.get_date())}"
+                """
+            )
+            conn.commit()
+
+            import_list=[]
+            for i in self.list_for_import_pulse:
+                row=[str(self.importDate.get_date())]
+                for j in i:
+                    row.append(j)
+                import_list.append(row)
+
+            print(import_list)
+            cur.executemany("""
+                        INSERT INTO courses(
+                            date,
+                            emp_tab,
+                            emp_mail,
+                            boss_tab,
+                            boss_mail,
+                            course_name,
+                            deadline
+                        ) VALUES(?, ?, ?, ?, ?, ?, ? );
+                        """, import_list)
+            conn.commit()
+            self.top.destroy()
+            self.top.update()
+            self.root.update()
+            messagebox.showinfo('Внимание', 'Создано записей: ' + str(len(self.list_for_import_pulse)))
+            self.text_widget.destroy()
+            self.text_widget = None
+            self.draw_stats()
 
     def send_mails(self):
         if self.text_for_letter:
@@ -155,7 +294,7 @@ class Window:
             smtpObj.starttls()
             smtpObj.login(self.login.get(), self.password.get())
             try:
-                smtpObj.sendmail(self.login.get(), "admitriev211@gmail.com", msg.as_string())
+                smtpObj.sendmail(self.login.get(), "arsadmitriev@sberbank.ru", msg.as_string())
                 smtpObj.quit()
                 # smtpObj = smtplib.SMTP('smtp.mail.ru', 587)
                 # smtpObj.starttls()
@@ -168,11 +307,6 @@ class Window:
                 messagebox.showinfo('Внимание', 'Что-то пошло не так')
         else:
             messagebox.showinfo('Внимание', 'Файл с текстом не прочитан')
-
-
-    wanted_files = (
-        ("excel files", "*.xls;*.xlsx"),
-    )
 
     def get_text_for_letter(self):
         file_name = fd.askopenfilename(title="Выберите файл с текстом письма")
