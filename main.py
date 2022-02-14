@@ -14,9 +14,13 @@
 #     print_hi('PyCharm')
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
-
+import os
 from window import Window
 
+path = os.path.dirname(os.path.abspath(__file__)) + '\dbase'
+
+if not os.path.exists(path):
+    os.makedirs(path)
 window = Window(
     width=800,
     height=600,
