@@ -18,13 +18,17 @@ import os
 from window import Window
 
 path = os.path.dirname(os.path.abspath(__file__)) + '\dbase'
+save_path = os.path.dirname(os.path.abspath(__file__)) + '\out'
 
 if not os.path.exists(path):
     os.makedirs(path)
+
+if not os.path.exists(save_path):
+    os.makedirs(save_path)
 window = Window(
     width=800,
     height=600,
-    title="Обученность"
+    title='HR-проект Байкальского Банка "Халявы.нет"'
 )
 
 window.draw_menu()
