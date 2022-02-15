@@ -1,7 +1,6 @@
 from tkinter import *
 from tkinter import filedialog as fd
 from tkinter import messagebox
-from tkcalendar import DateEntry
 from tkinter.ttk import Combobox
 from child_window import ChildWindow
 from email.mime.text import MIMEText
@@ -11,7 +10,7 @@ import xlwt
 import sqlite3
 import datetime
 import smtplib
-
+# from tkcalendar import DateEntry
 
 class Window:
     def __init__(self, title, width=400, height=300, resizable=(False, False), icon=None):
@@ -432,8 +431,10 @@ class Window:
         import_form = ChildWindow(self.root, 350, 200, 'Импорт ' + self.report_name(table))
         self.top.destroy()
         self.top = import_form.root
-        Label(import_form.root, text="Дата отчета").pack()
-        self.importDate = DateEntry(import_form.root, width=25, date_pattern='dd/mm/yyyy', background='darkblue', foreground='white', borderwidth=2)
+        Label(import_form.root, text="Дата отчета (ГГГГ-ММ-ДД)").pack()
+        # self.importDate = DateEntry(import_form.root, width=25, date_pattern='dd/mm/yyyy', background='darkblue', foreground='white', borderwidth=2)
+        self.importDate = Entry(import_form.root, width=25)
+        self.importDate.insert(0, datetime.date.today().strftime('%Y-%m-%d'))
         self.importDate.pack()
         Button(import_form.root, width=25, text="Выбрать файл", command=lambda: self.get_file(table)).pack()
         self.chosen_file = Text(import_form.root)
@@ -455,42 +456,47 @@ class Window:
                 messagebox.showinfo('Внимание', 'Ошибка парсинга: ' + str(e))
 
     def import_file(self, table):
+        # gotDate = self.importDate.get_date()
+        try:
+            gotDate = self.importDate.get()
+            datetime.datetime.strptime(gotDate, "%Y-%m-%d")
+            create_query = self.create_query(table)
+            insert_query = self.insert_query(table)
+            if self.list_for_import and gotDate:
+                conn = sqlite3.connect(r'dbase/dbase.db')
+                cur = conn.cursor()
+                cur.execute(
+                    create_query
+                )
+                conn.commit()
 
-        create_query = self.create_query(table)
-        insert_query = self.insert_query(table)
-        if self.list_for_import and self.importDate.get_date():
-            conn = sqlite3.connect(r'dbase/dbase.db')
-            cur = conn.cursor()
-            cur.execute(
-                create_query
-            )
-            conn.commit()
+                cur.execute(
+                    f"""
+                    DELETE FROM {table} WHERE date = "{str(gotDate)}"
+                    """
+                )
+                conn.commit()
 
-            cur.execute(
-                f"""
-                DELETE FROM {table} WHERE date = "{str(self.importDate.get_date())}"
-                """
-            )
-            conn.commit()
+                import_list=[]
+                for i in self.list_for_import:
+                    row=[str(gotDate)]
+                    for j in i:
+                        row.append(j)
+                    import_list.append(row)
 
-            import_list=[]
-            for i in self.list_for_import:
-                row=[str(self.importDate.get_date())]
-                for j in i:
-                    row.append(j)
-                import_list.append(row)
-
-            print(import_list)
-            cur.executemany(insert_query, import_list)
-            conn.commit()
-            self.top.destroy()
-            self.top.update()
-            self.root.update()
-            messagebox.showinfo('Внимание', 'Создано записей: ' + str(len(self.list_for_import)))
-            self.text_widget.destroy()
-            self.text_widget = None
-            self.draw_stats()
-
+                print(import_list)
+                cur.executemany(insert_query, import_list)
+                conn.commit()
+                self.top.destroy()
+                self.top.update()
+                self.root.update()
+                messagebox.showinfo('Внимание', 'Создано записей: ' + str(len(self.list_for_import)))
+                if self.text_widget:
+                    self.text_widget.destroy()
+                self.text_widget = None
+                self.draw_stats()
+        except Exception as e:
+            messagebox.showinfo('Внимание', str(e))
     def send_mail_form(self):
         send_form = ChildWindow(self.root, 400, 400, "Отправка уведомлений")
         self.top = send_form.root
