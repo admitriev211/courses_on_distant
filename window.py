@@ -10,9 +10,14 @@ import xlwt
 import sqlite3
 import datetime
 import smtplib
+import math
 # from tkcalendar import DateEntry
 
 class Window:
+    wanted_files = (
+        ("excel files", "*.xls;*.xlsx"),
+    )
+
     def __init__(self, title, width=400, height=300, resizable=(False, False), icon=None):
         self.root = Tk()
         self.root.title(title)
@@ -37,13 +42,27 @@ class Window:
         self.scroll_bar.pack(side=RIGHT, fill=Y)
         self.text_widget = None
         self.last_date_pulse=None
-        self.last_date_distant = None
-        # self.draw_stats()
+        self.last_date_last_date_status = None
+        self.draw_menu()
+        self.draw_buttons()
         try:
+            try:
+                conn = sqlite3.connect(r'dbase/dbase.db')
+                cur = conn.cursor()
+                cur.execute(f"""
+                                                SELECT
+                                                    *
+                                                FROM employees
+                                            """)
+                employees = cur.fetchall()
+                employees[0]
+                cur.close()
+            except:
+                self.import_statka()
             self.draw_stats()
         except Exception as e:
             print(e)
-            messagebox.showinfo("Ошибка запроса",e)
+            messagebox.showinfo("Ошибка запроса", e)
 
     def run(self):
         self.root.mainloop()
@@ -51,7 +70,54 @@ class Window:
     def create_child(self, width, height, title, resizable=(False,False), icon=None):
         ChildWindow(self.root, width, height, title, resizable, icon)
 
-    def get_data_for_dash(self):
+    def draw_buttons(self):
+        # gosb_dict = {
+        #     'ТБ': 'tb',
+        #     '8586': 'Иркутское отделение № 8586',
+        #     '8600': 'Читинское отделение № 8600',
+        #     '8601': 'Бурятское отделение № 8601',
+        #     '8603': 'Якутское отделение № 8603'
+        # }
+        def show_stats(gosb='tb'):
+            self.text_widget.destroy()
+            self.text_widget = None
+            self.draw_stats(gosb)
+
+        new_frame = Frame(self.root)
+        new_frame.pack(side=TOP)
+
+        Button(
+            new_frame,
+            width=23,
+            text="ТБ",
+            command=lambda: show_stats('tb')
+        ).pack(side='left', pady=10)
+        Button(
+            new_frame,
+            width=23,
+            text="8586",
+            command=lambda: show_stats('Иркутское отделение № 8586')
+        ).pack(side='left', pady=10)
+        Button(
+            new_frame,
+            width=23,
+            text="8600",
+            command=lambda: show_stats('Читинское отделение № 8600')
+        ).pack(side='left', pady=10)
+        Button(
+            new_frame,
+            width=23,
+            text="8601",
+            command=lambda: show_stats('Бурятское отделение № 8601')
+        ).pack(side='left', pady=10)
+        Button(
+            new_frame,
+            width=23,
+            text="8603",
+            command=lambda: show_stats('Якутское отделение № 8603')
+        ).pack(side='left', pady=10)
+
+    def get_data_for_dash(self, gosb = "tb"):
         def find_last_date(table):
             conn = sqlite3.connect(r'dbase/dbase.db')
             cur = conn.cursor()
@@ -66,67 +132,145 @@ class Window:
                                    reverse=True)  # переформат в даты и сортировка
             return dates_as_date[0].strftime('%Y-%m-%d')
 
-        self.last_date_pulse = find_last_date('courses')
-        self.last_date_distant = find_last_date('status')
-        self.last_date_vacations = find_last_date('vacations')
+        try:
+            self.last_date_status = find_last_date('status')
+        except:
+            self.reportWindow('status')
+        try:
+            self.last_date_distance = find_last_date('distance')
+        except:
+            self.reportWindow('distance')
+        try:
+            self.last_date_pulse = find_last_date('courses')
+        except:
+            self.reportWindow('courses')
+        try:
+            self.last_date_course_dt = find_last_date('course_dt')
+        except:
+            self.reportWindow('course_dt')
+
+        # try:
+        #     self.last_date_vacations = find_last_date('vacations')
+        # except:
+        #     self.reportWindow('vacations')
+
 
         query = f"""
             SELECT
-                t1.dep_3_level,
-                t1.dep_5_level,
-                t1.tabs,
-                t1.distant_count,
-                t1.course_count,
-                t2.days
-            FROM (
-                SELECT
-                    dep_3_level,
-                    dep_5_level,
-                    count(DISTINCT tab) as tabs,
-                    count(DISTINCT status.emp_tab) as distant_count,
-                    count(DISTINCT courses.course_name) as course_count
-                FROM employees
-                LEFT JOIN status
-                ON tab = status.emp_tab and status.date = "{self.last_date_distant}"
-                LEFT JOIN courses
-                ON status.emp_tab = courses.emp_tab and courses.date = "{self.last_date_pulse}"
-                GROUP BY dep_3_level, dep_5_level
-                ORDER BY course_count DESC, distant_count DESC
-                ) as t1
-            LEFT JOIN (
-                SELECT
-                    dep_3_level,
-                    dep_5_level,
-                    count(DISTINCT tab),
-                    count(DISTINCT status.emp_tab),
-                    sum(days_left) as days
-                FROM employees
-                LEFT JOIN status
-                ON tab = status.emp_tab and status.date = "{self.last_date_distant}"
-                LEFT JOIN vacations
-                ON status.emp_tab = vacations.emp_tab and vacations.date = "{self.last_date_vacations}"
-                GROUP BY
-                    dep_3_level,
-                    dep_5_level
-                ) as t2
-            ON t1.dep_3_level = t2.dep_3_level and t1.dep_5_level = t2.dep_5_level
-
+                dep_3_level,
+                dep_5_level,
+                count(DISTINCT tab) as tabs,
+                count(courses.course_name) as course_count,
+                count(course_dt.course_name) as course_dt_count
+            FROM
+                employees
+            LEFT JOIN
+                distance
+            ON tab = distance.emp_tab and distance.date = "{self.last_date_distance}"
+            LEFT JOIN
+                status
+            ON tab = status.emp_tab and status.date = "{self.last_date_status}"
+            LEFT JOIN
+                courses
+            ON courses.emp_tab = tab and courses.date = "{self.last_date_pulse}"
+            LEFT join
+                course_dt
+            ON course_dt.emp_tab = tab and course_dt.date = "{self.last_date_course_dt}"
+            WHERE status = "Болен" OR distance = "дистант"          
+            GROUP BY dep_3_level, dep_5_level
         """
+
+        if gosb != 'tb':
+            query = f"""
+            SELECT
+                dep_5_level,
+                dep_7_level,
+                count(DISTINCT tab) as tabs,
+                count(courses.course_name) as course_count,
+                count(course_dt.course_name) as course_dt_count
+            FROM
+                employees
+            LEFT JOIN
+                distance
+            ON tab = distance.emp_tab and distance.date = "{self.last_date_distance}"
+            LEFT JOIN
+                status
+            ON tab = status.emp_tab and status.date = "{self.last_date_status}"
+            LEFT JOIN
+                courses
+            ON courses.emp_tab = tab and courses.date = "{self.last_date_pulse}"
+            LEFT join
+                course_dt
+            ON course_dt.emp_tab = tab and course_dt.date = "{self.last_date_course_dt}"
+            WHERE (status = "Болен" OR distance = "дистант") and dep_5_level = "{gosb}"      
+            GROUP BY dep_5_level, dep_7_level
+        """
+
+        print(gosb)
+        print(query)
+        # query = f"""
+        #     SELECT
+        #         t1.dep_3_level,
+        #         t1.dep_5_level,
+        #         t1.tabs,
+        #         t1.distance_count,
+        #         t1.sick_count,
+        #         t1.course_count,
+        #         t2.days
+        #     FROM (
+        #         SELECT
+        #             dep_3_level,
+        #             dep_5_level,
+        #             count(DISTINCT tab) as tabs,
+        #             count(DISTINCT distance.emp_tab) as distance_count,
+        #             count(DISTINCT status.emp_tab) as sick_count,
+        #             count(courses.course_name) as course_count
+        #         FROM employees
+        #         LEFT JOIN distance
+        #         ON tab = distance.emp_tab and distance.date = "{self.last_date_distance}"
+        #         LEFT JOIN status
+        #         ON tab = status.emp_tab and status.date = "{self.last_date_status}"
+        #         LEFT JOIN courses
+        #         ON (status.emp_tab = courses.emp_tab or distance.emp_tab = courses.emp_tab) and courses.date = "{self.last_date_pulse}"
+        #         GROUP BY dep_3_level, dep_5_level
+        #         ORDER BY course_count DESC, distance_count DESC
+        #         ) as t1
+        #     LEFT JOIN (
+        #         SELECT
+        #             dep_3_level,
+        #             dep_5_level,
+        #             count(DISTINCT tab),
+        #             count(DISTINCT status.emp_tab),
+        #             sum(days_left) as days
+        #         FROM employees
+        #         LEFT JOIN status
+        #         ON tab = status.emp_tab and status.date = "{self.last_date_status}"
+        #         LEFT JOIN vacations
+        #         ON status.emp_tab = vacations.emp_tab and vacations.date = "{self.last_date_vacations}"
+        #         GROUP BY
+        #             dep_3_level,
+        #             dep_5_level
+        #         ) as t2
+        #     ON t1.dep_3_level = t2.dep_3_level and t1.dep_5_level = t2.dep_5_level
+        #
+        # """
 
         conn = sqlite3.connect(r'dbase/dbase.db')
         cur = conn.cursor()
         cur.execute(query)
         result = cur.fetchall()
-        print(result)
+        print(result[:10])
         # print(str(len(result)))
         cur.close()
         return result
 
     def report_name(self, table):
         names = {
-            'courses': 'Отчет из Пульс',
+            'courses': 'Обученность по обяз.программам',
             'status': 'Данные о заболевших',
-            'vacations': 'Данные об отпусках'
+            'vacations': 'Данные об отпусках',
+            'distance': 'Данные по дистанционке',
+            'course_dt': 'Обученность по СЦТ для массовых должностей'
         }
         return names[table]
 
@@ -145,6 +289,20 @@ class Window:
                 FOREIGN KEY (emp_tab) REFERENCES employees(tab),
                 FOREIGN KEY (boss_tab) REFERENCES employees(tab));
                 """
+        elif table == 'course_dt':
+            create_query = """
+                CREATE TABLE IF NOT EXISTS course_dt(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT,
+                emp_tab INT,
+                emp_mail TEXT,
+                boss_tab INT,
+                boss_mail TEXT,
+                course_name TEXT,
+                deadline TEXT,
+                FOREIGN KEY (emp_tab) REFERENCES employees(tab),
+                FOREIGN KEY (boss_tab) REFERENCES employees(tab));
+                            """
         elif table == 'status':
             create_query = """
                 CREATE TABLE IF NOT EXISTS status(
@@ -165,12 +323,34 @@ class Window:
                 FOREIGN KEY (emp_tab) REFERENCES employees(tab)
                 );
             """
+        elif table == 'distance':
+            create_query = """
+                CREATE TABLE IF NOT EXISTS distance(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT,
+                emp_tab INTEGER,
+                distance TEXT DEFAULT "дистант",
+                FOREIGN KEY (emp_tab) REFERENCES employees(tab)
+                )
+            """
         return create_query
 
     def insert_query(self, table):
         if table == 'courses':
             insert_query = """
                 INSERT INTO courses(
+                    date,
+                    emp_tab,
+                    emp_mail,
+                    boss_tab,
+                    boss_mail,
+                    course_name,
+                    deadline
+                ) VALUES(?, ?, ?, ?, ?, ?, ? );
+                        """
+        elif table == 'course_dt':
+            insert_query = """
+                INSERT INTO course_dt(
                     date,
                     emp_tab,
                     emp_mail,
@@ -196,16 +376,26 @@ class Window:
                                 days_left
                             ) VALUES(?, ?, ?);
                         """
+        elif table == 'distance':
+            insert_query = """
+                                        INSERT INTO distance(
+                                            date,
+                                            emp_tab
+                                        ) VALUES(?, ?);
+                                    """
         return insert_query
 
     def parse_excel(self, table, sh):
         header = {
             'courses': 1,
+            'course_dt': 7,
             'status': 0,
-            'vacations': 3
+            'vacations': 3,
+            'statka': 6,
+            'distance': 0
         }
         def find_cols(table):
-            cols_list=[]
+            cols_list = []
             fields = {
                 'courses': [
                     'ТН',
@@ -215,6 +405,14 @@ class Window:
                     'Наименование курса',
                     'Контрольная дата прохождения'
                 ],
+                'course_dt': [
+                    'Табельный номер',
+                    'Внешняя почта',
+                    'ТН руководителя',
+                    'Внешняя почта руководителя',
+                    'Наименование предмета',
+                    'Контрольная дата'
+                ],
                 'status': [
                     'Табельный номер',
                     'Статус'
@@ -222,11 +420,21 @@ class Window:
                 'vacations': [
                     'ТН',
                     'годнакоплено дней'
+                ],
+                'statka': [
+                    "Сотрудник",
+                    "Подразделение 03 ур.",
+                    "Подразделение 05 ур.",
+                    "Подразделение 06 ур.",
+                    "Подразделение 07 ур."
+
+                ],
+                'distance': [
+                    "I_PERNR_PR",
                 ]
             }
-
             for f in fields[table]:
-                for col in range(header[table], sh.ncols):
+                for col in range(0, sh.ncols):
                     if sh.cell(header[table], col).value == f:
                         cols_list.append(col)
 
@@ -234,48 +442,50 @@ class Window:
 
         row_list = []
         cols = find_cols(table)
-        print(cols)
         for row in range(header[table]+1, sh.nrows):
-            line = [sh.cell(row, col).value for col in cols if sh.cell(row, cols[0]).value != '']
+            line = [sh.cell(row, col).value for col in cols if sh.cell(row, cols[0]).value != '' and sh.cell(row, cols[0]).value != '#']
             if len(line) == len(cols):
                 row_list.append(line)
         return row_list
 
-    def draw_stats(self):
-        gotData = [d for d in self.get_data_for_dash() if d[3]>0]
+    def draw_stats(self, gosb='tb'):
+        gotData = [d for d in self.get_data_for_dash() if d[3] + d[4] >0]
+        if gosb != 'tb':
+            gotData = [d for d in self.get_data_for_dash(gosb) if d[3] + d[4] > 0]
+        gotData = sorted(gotData, key=lambda x: x[3] + x[4], reverse=True)
         self.text_widget = Listbox(self.root, width=800, yscrollcommand = self.scroll_bar.set)
 
         self.text_widget.insert(END, 'Дата загрузки отчета из Пульс: ' + self.last_date_pulse +'\n')
-        self.text_widget.insert(END, 'Дата загрузки данных о заболевших: ' + self.last_date_distant + '\n')
-        self.text_widget.insert(END, 'Дата загрузки данных об отпусках: ' + self.last_date_vacations + '\n')
+        self.text_widget.insert(END, 'Дата загрузки данных о заболевших: ' + self.last_date_status + '\n')
+        # self.text_widget.insert(END, 'Дата загрузки данных об отпусках: ' + self.last_date_vacations + '\n')
 
         self.text_widget.insert(END, '' + '\n')
-        item = 4
+        item = 3
 
         for i in range(0, len(gotData)):
             row = gotData[i]
             # self.text_widget.insert(END, 'Рук-ль: ' + row[0] +'\n')
             self.text_widget.insert(END, 'Подразделение: ' + row[0] + '-->' + row[1] +'\n')
-            self.text_widget.insert(END, 'Всего сотрудников: ' + str(row[2]) +'\n')
-            self.text_widget.insert(END, 'Находятся дома: ' + str(row[3]) +'\n')
-            item += 3
-            self.text_widget.insert(END, 'Кол-во незавершенных курсов у сотрудников, находящихся дома: ' + str(row[4]) +'\n')
-            if row[5]:
-                self.text_widget.insert(END, 'Ср.кол-во накопленных дней отпуска на 1 сотрудника, находящегося дома: ' + str(int(row[5]/row[3])))
-            else:
-                self.text_widget.insert(END,
-                                        'Ср.кол-во накопленных дней отпуска на 1 сотрудника, находящегося дома: 0')
-            self.text_widget.insert(END, '---------------------------------------------' + '\n')
+            self.text_widget.insert(END, 'Находятся дома: ' + str(row[2]) +'\n')
+            item += 2
+            self.text_widget.insert(END, 'Кол-во незавершенных обязательных курсов: ' + str(row[3]) +'\n')
+            if row[3] > 0:
+                self.text_widget.itemconfig(item, bg='red')
+            item += 1
+            self.text_widget.insert(END, 'Кол-во незавершенных курсов СТЦ для массовых должностей: ' + str(row[4]) + '\n')
             if row[4] > 0:
                 self.text_widget.itemconfig(item, bg='red')
-            item += 3
+            # if row[6]:
+            #     self.text_widget.insert(END, 'Ср.кол-во накопленных дней отпуска на 1 сотрудника, находящегося дома: ' + str(int(row[6]/(row[3] + row[4]))))
+            # else:
+            #     self.text_widget.insert(END,
+            #                             'Ср.кол-во накопленных дней отпуска на 1 сотрудника, находящегося дома: 0')
+            self.text_widget.insert(END, '---------------------------------------------' + '\n')
+            item += 2
+
 
         self.text_widget.pack(side = LEFT, fill=BOTH)
         self.scroll_bar.config(command=self.text_widget.yview)
-
-    wanted_files = (
-        ("excel files", "*.xls;*.xlsx"),
-    )
 
     def draw_menu(self):
         menu_bar = Menu(self.root)
@@ -286,14 +496,17 @@ class Window:
         # menu_bar.add_cascade(label="Импорт", menu=import_menu)
 
         tools_menu = Menu(menu_bar, tearoff=0)
-        tools_menu.add_command(label="Рассылка уведомлений", command=self.send_mail_form)
-        # tools_menu.add_command(label="Рассылка предупреждений")
+        tools_menu.add_command(label="Рассылка уведомлений заболевшим", command=lambda: self.send_mail_form('sick'))
+        tools_menu.add_command(label="Рассылка уведомлений на дистанте", command=lambda: self.send_mail_form('distant'))
         menu_bar.add_cascade(label="Инструменты", menu=tools_menu)
 
         reports_menu = Menu(menu_bar, tearoff=0)
-        reports_menu.add_command(label="Отчеты из Пульса", command=lambda: self.reportWindow('courses'))
+        reports_menu.add_command(label="Обученность по обязательным программам", command=lambda: self.reportWindow('courses'))
+        reports_menu.add_command(label="Обученность по СЦТ",
+                                 command=lambda: self.reportWindow('course_dt'))
         reports_menu.add_command(label="Данные о заболевших", command=lambda: self.reportWindow('status'))
-        reports_menu.add_command(label="Данные об отпусках", command=lambda: self.reportWindow('vacations'))
+        reports_menu.add_command(label="Данные о УРМ", command=lambda: self.reportWindow('distance'))
+        # reports_menu.add_command(label="Данные об отпусках", command=lambda: self.reportWindow('vacations'))
         menu_bar.add_cascade(label="Отчеты", menu=reports_menu)
 
         dict_menu = Menu(menu_bar, tearoff=0)
@@ -309,42 +522,76 @@ class Window:
         try:
             query = f"""
                 SELECT
-                    t1.dep_3_level,
-                    t1.dep_5_level,
-                    t1.tab,
-                    t1.status,
-                    t1.course_name,
-                    t1.deadline,
-                    t1.emp_mail,
-                    t1.boss_mail,
-                    t2.days_left
-                FROM (
-                    SELECT
-                        dep_3_level,
-                        dep_5_level,
-                        tab,
-                        status,
-                        course_name,
-                        deadline,
-                        emp_mail,
-                        boss_mail
-                    FROM employees
-                    LEFT JOIN status
-                    ON tab = status.emp_tab and status.date = "{self.last_date_distant}"
-                    LEFT JOIN courses
-                    ON status.emp_tab = courses.emp_tab and courses.date = "{self.last_date_pulse}"
-                    WHERE status = "Болен"
-                    ) as t1
-                LEFT JOIN (
-                    SELECT
-                        tab,
-                        days_left
-                    FROM employees
-                    LEFT JOIN vacations
-                    ON tab = vacations.emp_tab and vacations.date = "{self.last_date_vacations}"
-                    ) as t2
-                ON t1.tab = t2.tab
+                dep_3_level,
+                dep_5_level,
+                dep_6_level,
+                dep_7_level,
+                tab,
+                status,
+                distance,
+                courses.course_name,
+                courses.deadline,
+                courses.emp_mail,
+                courses.boss_mail,
+                course_dt.course_name,
+                course_dt.deadline,
+                course_dt.emp_mail,
+                course_dt.boss_mail           
+            FROM
+                employees
+            LEFT JOIN
+                distance
+            ON tab = distance.emp_tab and distance.date = "{self.last_date_distance}"
+            LEFT JOIN
+                status
+            ON tab = status.emp_tab and status.date = "{self.last_date_status}"
+            LEFT JOIN
+                courses
+            ON courses.emp_tab = tab and courses.date = "{self.last_date_pulse}"
+            LEFT join
+                course_dt
+            ON course_dt.emp_tab = tab and course_dt.date = "{self.last_date_course_dt}"
+            WHERE (status = "Болен" OR distance = "дистант")         
             """
+            #AND (courses.course_name != "" OR course_dt.course_name != "")
+            # query = f"""
+            #     SELECT
+            #         t1.dep_3_level,
+            #         t1.dep_5_level,
+            #         t1.tab,
+            #         t1.status,
+            #         t1.course_name,
+            #         t1.deadline,
+            #         t1.emp_mail,
+            #         t1.boss_mail,
+            #         t2.days_left
+            #     FROM (
+            #         SELECT
+            #             dep_3_level,
+            #             dep_5_level,
+            #             tab,
+            #             status,
+            #             course_name,
+            #             deadline,
+            #             emp_mail,
+            #             boss_mail
+            #         FROM employees
+            #         LEFT JOIN status
+            #         ON tab = status.emp_tab and status.date = "{self.last_date_status}"
+            #         LEFT JOIN courses
+            #         ON status.emp_tab = courses.emp_tab and courses.date = "{self.last_date_pulse}"
+            #         WHERE status = "Болен"
+            #         ) as t1
+            #     LEFT JOIN (
+            #         SELECT
+            #             tab,
+            #             days_left
+            #         FROM employees
+            #         LEFT JOIN vacations
+            #         ON tab = vacations.emp_tab and vacations.date = "{self.last_date_vacations}"
+            #         ) as t2
+            #     ON t1.tab = t2.tab
+            # """
             conn = sqlite3.connect(r'dbase/dbase.db')
             cur = conn.cursor()
             cur.execute(query)
@@ -352,13 +599,19 @@ class Window:
             result.insert(0,(
                 'Подразделение 3',
                 'Подразделение 5',
+                'Подразделение 6',
+                'Подразделение 7',
                 'Табельный',
-                'Статус',
-                'Не пройден курс',
+                'Состояние здоровья',
+                'Формат работы',
+                'Не пройден обязательным курсам',
                 'Контрольный срок',
                 'Внешняя почта',
                 'Внешняя почта руководителя',
-                'Накоплено дней'
+                'Не пройден курсам по СЦТ для массовых должностей',
+                'Контрольный срок',
+                'Внешняя почта',
+                'Внешняя почта руководителя',
             ))
 
             book = xlwt.Workbook(encoding="utf-8")
@@ -484,7 +737,6 @@ class Window:
                         row.append(j)
                     import_list.append(row)
 
-                print(import_list)
                 cur.executemany(insert_query, import_list)
                 conn.commit()
                 self.top.destroy()
@@ -497,29 +749,44 @@ class Window:
                 self.draw_stats()
         except Exception as e:
             messagebox.showinfo('Внимание', str(e))
-    def send_mail_form(self):
-        send_form = ChildWindow(self.root, 400, 400, "Отправка уведомлений")
+    def send_mail_form(self, reciever_type):
+        header = {
+            'sick': "Отправка уведомлений болеющим дома",
+            'distant': "Отправка уведомлений на дистанте"
+        }
+        send_form = ChildWindow(self.root, 400, 400, header[reciever_type])
         self.top = send_form.root
         Label(send_form.root, text="Введите сервер").pack()
         self.server = Entry(send_form.root, width=100)
+        self.server.insert(END, 'smtp.mail.ru')
         self.server.pack()
         Label(send_form.root, text="Введите логин").pack()
         self.login = Entry(send_form.root, width=100)
+        self.login.insert(END, 'bb_sales@bk.ru')
         self.login.pack()
         Label(send_form.root, text="Введите пароль").pack()
         self.password = Entry(send_form.root, width=100)
+        self.password.insert(END, 'DSPQV5c5NFM7G2mY7bPM')
         self.password.pack()
         Button(send_form.root, text="Файл с текстом письма", command=self.get_text_for_letter).pack()
-        Button(send_form.root, text="Разослать уведомления", command=self.send_mails).pack()
+        Button(send_form.root, text="Разослать уведомления", command=lambda: self.send_mails(reciever_type)).pack()
         scroll_bar = Scrollbar(send_form.root)
         scroll_bar.pack(side=RIGHT, fill=Y)
         self.text_on_screen = Text(send_form.root, width=400, height=300, wrap=WORD, yscrollcommand=scroll_bar.set)
         self.text_on_screen.pack()
         send_form.grab_focus()
 
-    def send_mails(self):
+    def get_text_for_letter(self):
+        file_name = fd.askopenfilename(title="Выберите файл с текстом письма")
+        if file_name:
+            with open(file_name, encoding = 'utf-8', mode='r') as f:
+                self.text_for_letter = f.read()
+                self.text_on_screen.insert(END, self.text_for_letter)
+
+    def send_mails(self, reciever_type):
         if self.text_for_letter:
-            query = f"""
+            query = {
+                'sick': f"""
                 SELECT
                     emp_mail,
                     boss_mail,
@@ -527,13 +794,44 @@ class Window:
                     deadline 
                 FROM status
                 LEFT JOIN courses
-                ON courses.emp_tab = status.emp_tab and status.date = "{self.last_date_distant}" and courses.date = "{self.last_date_pulse}" 
+                ON courses.emp_tab = status.emp_tab and status.date = "{self.last_date_status}" and courses.date = "{self.last_date_pulse}" 
                 WHERE status.status = "Болен"
-                     """
+                UNION
+                SELECT
+                    emp_mail,
+                    boss_mail,
+                    course_name,
+                    deadline 
+                FROM status
+                LEFT JOIN course_dt
+                ON course_dt.emp_tab = status.emp_tab and status.date = "{self.last_date_status}" and course_dt.date = "{self.last_date_course_dt}" 
+                WHERE status.status = "Болен"
+                     """,
+                'distant': f"""
+                SELECT
+                    emp_mail,
+                    boss_mail,
+                    course_name,
+                    deadline 
+                FROM distance
+                LEFT JOIN courses
+                ON courses.emp_tab = distance.emp_tab and distance.date = "{self.last_date_status}" and courses.date = "{self.last_date_pulse}" 
+                UNION
+                SELECT
+                    emp_mail,
+                    boss_mail,
+                    course_name,
+                    deadline 
+                FROM distance
+                LEFT JOIN course_dt
+                ON course_dt.emp_tab = distance.emp_tab and distance.date = "{self.last_date_status}" and course_dt.date = "{self.last_date_course_dt}"
+                    """
+            }
             conn = sqlite3.connect(r'dbase/dbase.db')
             cur = conn.cursor()
-            cur.execute(query)
+            cur.execute(query[reciever_type])
             result = cur.fetchall()
+            print(result)
             cur.close()
 
             to_list = list(set([r[0] for r in result if r[0]]))
@@ -547,41 +845,54 @@ class Window:
                     ] for course in result if course[0] == reciever
                 ] for reciever in to_list
             }
-
-            # print(courses_dict)
-
             try:
+                def xldate_to_datetime(xldatetime):  # something like 43705.6158241088
+
+                    tempDate = datetime.datetime(1899, 12, 31)
+                    (days, portion) = math.modf(xldatetime)
+
+                    deltaDays = datetime.timedelta(days=days)
+                    # changing the variable name in the edit
+                    secs = int(24 * 60 * 60 * portion)
+                    detlaSeconds = datetime.timedelta(seconds=secs)
+                    TheTime = (tempDate + deltaDays + detlaSeconds)
+                    return TheTime.strftime("%d-%m-%Y")
+
                 for k, v in courses_dict.items():
 
-                    course_list = ''
-                    for course in v:
-                        course_list += course[0] + '. Срок: ' + course[1] + '\n'
                     msg_text = f'''
                     to {k} \n
                     {self.text_for_letter}:\n
-                    {course_list}                    
                     '''
+                    for course in v:
+                        try:
+                            deadline = xldate_to_datetime(float(course[1]))
+                        except Exception as e:
+                            print(e)
+                            deadline = course[1]
+                        msg_text += f"""
+                        {course[0]}. Срок: {deadline} \n
+                        """
 
                     smtpObj = smtplib.SMTP(self.server.get(), 587)
                     smtpObj.starttls()
                     smtpObj.login(self.login.get(), self.password.get())
 
+                    # to = k
+                    # cc = v[0][2]
+
+                    to = "ars-dmitriev@mail.ru"
+                    cc = "admitriev211@gmail.com"
+
                     msg = MIMEText(msg_text)
                     msg['Subject'] = Header('Пройдите курсы в Пульс!', 'utf-8')
                     msg['From'] = self.login.get()
-                    # msg['To'] = "nvivanchikov@sberbank.ru"
-                    # msg['CC'] = "arsadmitriev@sberbank.ru"
-                    # smtpObj.sendmail(self.login.get(), ['nvivanchikov@sberbank.ru', 'arsadmitriev@sberbank.ru'],
-                    #                  msg.as_string())
-
-
-                    msg['To'] = k
-                    msg['CC'] = v[0][2]
-
-                    smtpObj.sendmail(self.login.get(), [k, v[0][2]], msg.as_string())
+                    msg['To'] = to
+                    msg['CC'] = cc
+                    smtpObj.sendmail(self.login.get(), [to, cc],
+                                     msg.as_string())
                     smtpObj.quit()
-
-
+                    break
                     # smtpObj = smtplib.SMTP('smtp.mail.ru', 587)
                     # smtpObj.starttls()
                     # smtpObj.login('bb_sales@bk.ru', 'DSPQV5c5NFM7G2mY7bPM')
@@ -596,53 +907,49 @@ class Window:
         else:
             messagebox.showinfo('Внимание', 'Файл с текстом не прочитан')
 
-    def get_text_for_letter(self):
-        file_name = fd.askopenfilename(title="Выберите файл с текстом письма")
-        if file_name:
-            with open(file_name, encoding = 'utf-8', mode='r') as f:
-                self.text_for_letter = f.read()
-                self.text_on_screen.insert(END, self.text_for_letter)
-            print(self.text_for_letter)
-
     def import_statka(self, wanted_files=wanted_files):
         file_name = fd.askopenfilename(title="Импорт ШР", filetypes=wanted_files)
         if file_name:
             xl = xlrd.open_workbook(file_name, on_demand=True)
             sh = xl.sheet_by_index(0)
-            record_list = []
-            for row in range(1, sh.nrows):
-                if sh.cell(row,12).value != 0.0:
-                    try:
-                        record = (
-                        int(sh.cell(row, 12).value),
-                        sh.cell(row, 2).value,
-                        sh.cell(row, 4).value,
-                        )
-                        record_list.append(record)
-                    except:
-                        print(str(row))
+            row_list = self.parse_excel('statka', sh)
 
-            conn = sqlite3.connect(r'dbase/dbase.db')
-            cur = conn.cursor()
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS employees(
-                tab INT PRIMARY KEY,
-                dep_3_level TEXT,
-                dep_5_level TEXT);
-                """
-            )
-            conn.commit()
-            cur.execute("SELECT * FROM employees;")
-            results = cur.fetchall()
-            tabs = [r[0] for r in results]
-            insert_list = [r for r in record_list if r[0] not in tabs]
-            update_list = [r for r in record_list if r[0] in tabs]
-            cur.executemany("UPDATE employees set dep_3_level = ?, dep_5_level = ? where tab = ?;", update_list)
-            conn.commit()
-            cur.executemany("INSERT INTO employees VALUES(?, ?, ?);", insert_list)
-            conn.commit()
-            messagebox.showinfo('Внимание', 'Создано записей: ' + str(len(insert_list)) + ', обновлено записей: ' + str(len(update_list)))
+            print(row_list[:10])
+            if row_list:
+                conn = sqlite3.connect(r'dbase/dbase.db')
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS employees(
+                    tab INT PRIMARY KEY,
+                    dep_3_level TEXT,
+                    dep_5_level TEXT,
+                    dep_6_level TEXT,
+                    dep_7_level TEXT);
+                    """
+                )
+                conn.commit()
+                cur.execute("SELECT * FROM employees;")
+                results = cur.fetchall()
+                tabs = [r[0] for r in results]
+                print(tabs[:10])
+
+                def kill_doubles(rows):
+                    existing_rows=[]
+                    new_rows = []
+                    for row in rows:
+                        if row[0] not in existing_rows:
+                            new_rows.append(row)
+                            existing_rows.append(row[0])
+                    return new_rows
+
+                insert_list = kill_doubles([r for r in row_list if r[0] not in tabs])
+                update_list = kill_doubles([r for r in row_list if r[0] in tabs])
+                cur.executemany("UPDATE employees set dep_3_level = ?, dep_5_level = ?, dep_6_level = ?, dep_7_level = ?  where tab = ?;", update_list)
+                conn.commit()
+                cur.executemany("INSERT INTO employees VALUES(?, ?, ?, ?, ?);", insert_list)
+                conn.commit()
+                messagebox.showinfo('Внимание', 'Создано записей: ' + str(len(insert_list)) + ', обновлено записей: ' + str(len(update_list)))
 
     def dict_employees(self):
         conn = sqlite3.connect(r'dbase/dbase.db')

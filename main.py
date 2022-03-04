@@ -28,8 +28,8 @@ if not os.path.exists(save_path):
 window = Window(
     width=800,
     height=600,
-    title='HR-проект Байкальского Банка "Халявы.нет"'
+    title='Проект "ОКкО САУРОНА"'
 )
 
-window.draw_menu()
+# window.draw_menu()
 window.run()
